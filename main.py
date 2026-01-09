@@ -22,10 +22,10 @@ params = {
         'h5_dir': '/mnt/dataset/songan_space/LV2_vision/vision_data_7channel_4h/',  # H5特征文件目录
         'label_file': "/mnt/dataset/songan_space/input_rq/label_rq_1Dvwap_0p2class_20100101_20251130.csv.gz",  # 标签CSV文件路径
         'train_start_date': '2017-01-01',
-        'train_end_date': '2017-12-31',
+        'train_end_date': '2020-11-30',
         'train_val_split': 0.8,
         'infer_start_date': '2021-01-01',
-        'infer_end_date': '2021-12-31',
+        'infer_end_date': '2024-12-31',
         # 模型参数
         'image_size': 8,
         'patch_size': 2,
@@ -39,8 +39,8 @@ params = {
         'pool': 'cls',  # cls池化
         'num_classes': 3, 
         # 训练参数
-        'batch_size': 64,
-        'num_epochs': 3,
+        'batch_size': 256,
+        'num_epochs': 50,
         'learning_rate': 0.0001,
         'weight_decay': 1e-5,
         'num_workers': 10,
@@ -49,9 +49,11 @@ params = {
         'checkpoint_dir': 'checkpoints',
         'checkpoint_path': 'checkpoints/best_model_vit_classification.pth',
         'output_dir': 'results',
+        'metric_dir': 'metrics',
     }
 
 def main():
+    train(params)
     infer(params)
 
 if __name__ == '__main__':
