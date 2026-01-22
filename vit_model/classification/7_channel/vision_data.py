@@ -52,19 +52,16 @@ class H5StockDataset(Dataset):
     def _eval_one_task(self, task_params):
         data_cache = {}
         sample = []
-        
         for day_tasks in task_params:
             file_date, day_samples, h5_file = day_tasks
-
             with h5py.File(h5_file, 'r') as f:
                 for _, row in day_samples.iterrows():
                     stock_code = row['stock_code']
+                    # 只加载merge后匹配成功的数据
                     features = f[stock_code][:].astype(np.float32)
-                    
                     for c in range(features.shape[0]):
                         channel_max = np.max(np.abs(features[c]))
                         features[c] = features[c] / channel_max
-                    
                     cache_key = (file_date, stock_code)
                     data_cache[cache_key] = features
                     sample.append({
@@ -72,7 +69,6 @@ class H5StockDataset(Dataset):
                         'stock_code': stock_code,
                         'label': row['label']
                     })
-        
         return sample, data_cache
     
     def _load_all_data(self):
@@ -105,7 +101,6 @@ class H5StockDataset(Dataset):
         samples = []
         all_task_list = [] # 任务列表[]——>[[(file_date, day_samples, h5_file), (...),..],[..]]
         tasks = []
-
         for i in range(self.num_workers):
             task_list = []
             start_idx = i * chunk_size
@@ -113,7 +108,7 @@ class H5StockDataset(Dataset):
             each_worker_date = date_list[start_idx:end_idx]
             for file_date in each_worker_date:
                 h5_file = h5_file_map[file_date]
-                day_samples = merged_by_date.get_group(file_date)# 获取指定分组值
+                day_samples = merged_by_date.get_group(file_date)
                 task_list.append((file_date, day_samples, h5_file))
             all_task_list.append(task_list)
 
@@ -126,42 +121,7 @@ class H5StockDataset(Dataset):
             samples_part, data_cache_part = one_task
             samples.extend(samples_part)
             self.data_cache.update(data_cache_part) #这里把不同进程的内存合并到主内存
-
-        slide_window = 5
-        stock_group = {}
         
-        for (file_date, stock_code), features in self.data_cache.items():
-            if stock_code not in stock_group:
-                stock_group[stock_code] = []
-            stock_group[stock_code].append((file_date, features))
-        
-        for stock_code, item_info in stock_group.items():
-            sorted_items = sorted(item_info, key=lambda x: x[0])
-            for day in range(slide_window-1, len(sorted_items)):
-                file_date, features = sorted_items[day]
-                window_features = [sorted_items[i][1] for i in range(day-slide_window+1, day+1)]
-                agg_features = np.stack(window_features, axis=0)
-                mean_features = np.mean(agg_features, axis=0)
-                std_features = np.std(agg_features, axis=0)
-                features = np.concatenate([features, mean_features, std_features], axis=0)
-                self.data_cache[(file_date, stock_code)] = features
-        
-        # 按股票分组samples
-        stock_samples = {}
-        for s in samples:
-            stock_code = s['stock_code']
-            if stock_code not in stock_samples:
-                stock_samples[stock_code] = []
-            stock_samples[stock_code].append(s)
-
-        # 对每个股票排序并删除前4个
-        filtered_samples = []
-        for stock_code, stock_sample_list in stock_samples.items():
-            sorted_samples = sorted(stock_sample_list, key=lambda x: x['datetime'])
-            filtered_samples.extend(sorted_samples[slide_window-1:])  # 跳过前4个
-
-        samples = filtered_samples
-
         return samples
         
     def __len__(self):
@@ -176,7 +136,7 @@ class H5StockDataset(Dataset):
         label = torch.tensor(sample['label'], dtype=torch.long)
         
         return {
-            'features': features,  # (21, 8, 8) 
+            'features': features,  # (7, 8, 8)
             'label': label,        # 0, 1, 2
             'stock_code': sample['stock_code'],
             'datetime': sample['datetime']

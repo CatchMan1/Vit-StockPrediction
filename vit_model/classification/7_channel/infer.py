@@ -55,18 +55,26 @@ def infer(params):
     for h5_file in all_h5:
         date_match = re.search(r'(\d{4}-\d{2}-\d{2})', h5_file.name)
         # 检查文件名是否包含日期
-        if date_match:
-            file_date = date_match.group(1)
-            if start_date <= file_date <= end_date:
-                day_list.append((file_date, h5_file))
-    for file_date, h5_file in tqdm(day_list, desc='VIT-Inference'):
+        file_date = date_match.group(1)
+        if start_date <= file_date <= end_date:
+            day_info = {}  # 每个日期创建独立的字典
+            with h5py.File(h5_file, 'r') as f:
+                for stock_code in f.keys():
+                    # 读取并归一化
+                    features = f[stock_code][:].astype(np.float32)
+                    for c in range(features.shape[0]):
+                        channel_max = np.max(np.abs(features[c]))
+                        if channel_max > 0:
+                            features[c] /= channel_max
+                    day_info[stock_code] = features
+            day_list.append((file_date, day_info))
+
+    for file_date, day_info in tqdm(day_list, desc='VIT-Inference'):
         outputs_list = []
-        with h5py.File(h5_file, 'r') as f:
-            keys = list(f.keys())
-            infer_data_tensor = torch.stack([
-                torch.from_numpy(f[key][:]).float() for key in keys[:]
-            ])
-            infer_data_tensor = infer_data_tensor.to(device)
+        infer_data_tensor = torch.stack([
+            torch.from_numpy(day_info[key]).float() for key in day_info.keys()
+        ])
+        infer_data_tensor = infer_data_tensor.to(device)
         with torch.no_grad():
             num_batches = (len(infer_data_tensor) + params['batch_size'] - 1) // params['batch_size']
             # 在一个日期内对batch_size进行划分,对一批一批股票进行模型推理
@@ -81,12 +89,14 @@ def infer(params):
             all_prob = torch.cat(outputs_list, dim=0)
             factor = all_prob[:, 2] - all_prob[:, 0]
             data_list = factor.tolist()
-            day_df = pd.DataFrame([data_list], columns=keys[:])
-            day_df['date'] = file_date
+            day_df = pd.DataFrame([[file_date] + data_list], columns=['date'] + list(day_info.keys()))
             factor_list.append(day_df)
     factor_df = pd.concat(factor_list)
-    factor_df.set_index('date', inplace=True)
     os.makedirs(params['output_dir'], exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = os.path.join(params['output_dir'], f'predictions_{timestamp}.csv')
-    factor_df.to_csv(output_file, index=False)
+    os.makedirs(params['output_classification_dir'], exist_ok=True)
+    output_file = params['infer_path']
+    output_gz = params['infer_path_gz']
+    output_task = params['output_task']
+    factor_df.to_csv(output_file, index = False)
+    factor_df.to_csv(output_gz, index = False)
+    factor_df.to_csv(output_task, index = False)

@@ -23,7 +23,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch):
     all_predictions = []
     all_targets = []
     
-    pbar = tqdm(dataloader, desc=f'Epoch {epoch} [Train]', mininterval=20)
+    pbar = tqdm(dataloader, desc=f'Epoch {epoch} [Train]', mininterval=50)
     for batch_idx, batch in enumerate(pbar):
         features = batch['features'].to(device)
         labels = batch['label'].to(device)
@@ -43,7 +43,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch):
         all_predictions.append(preds.detach().cpu())
         all_targets.append(labels.detach().cpu())
 
-        if batch_idx % 20 == 0 or batch_idx == len(dataloader) - 1:
+        if batch_idx % 50 == 0 or batch_idx == len(dataloader) - 1:
             pbar.set_postfix({'loss': f'{loss.item():.6f}'})
     
     avg_loss = total_loss / len(dataloader)
@@ -71,8 +71,8 @@ def validate(model, dataloader, criterion, device, epoch):
     all_targets = []
     
     with torch.no_grad():
-        pbar = tqdm(dataloader, desc=f'Epoch {epoch} [Valid]', mininterval=20)
-        for batch in pbar:
+        pbar = tqdm(dataloader, desc=f'Epoch {epoch} [Valid]', mininterval=30)
+        for batch_idx,batch in enumerate(pbar):
             features = batch['features'].to(device)
             labels = batch['label'].to(device)
             
@@ -86,7 +86,7 @@ def validate(model, dataloader, criterion, device, epoch):
             all_predictions.append(preds.cpu())
             all_targets.append(labels.cpu())
             
-            if batch_idx % 20 == 0 or batch_idx == len(dataloader) - 1:
+            if batch_idx % 30 == 0 or batch_idx == len(dataloader) - 1:
                 pbar.set_postfix({'loss': f'{loss.item():.6f}'})
     
     avg_loss = total_loss / len(dataloader)
@@ -106,29 +106,28 @@ def validate(model, dataloader, criterion, device, epoch):
     
     return avg_loss, accuracy, metrics
 
-def save_training_metrics(metrics_history, metric_dir):
+def save_training_metrics(metrics_history, params):
         # 训练指标
-        os.makedirs(metric_dir, exist_ok=True)
-        
+        os.makedirs(params['metric_dir'], exist_ok=True)
+        os.makedirs(params['metric_classification_dir'], exist_ok=True)
         # 保存为JSON文件
-        json_path = os.path.join(metric_dir, 'training_metrics.json')
+        json_path = params['train_json_path']
         with open(json_path, 'w') as f:
             json.dump(metrics_history, f, indent=2)
         print(f"指标数据已保存到: {json_path}")
         
         # 保存为CSV文件
         df = pd.DataFrame(metrics_history)
-        csv_path = os.path.join(metric_dir, 'training_metrics.csv')
+        csv_path = params['train_csv_path']
         df.to_csv(csv_path, index=False)
         print(f"指标数据已保存为CSV: {csv_path}")
 
 
-def plot_training_curves(metrics_history, metric_dir):
+def plot_training_curves(metrics_history, params):
     # 绘制训练和验证的损失与准确率曲线
-    os.makedirs(metric_dir, exist_ok=True)
-    
+    os.makedirs(params['metric_dir'], exist_ok=True)
+    os.makedirs(params['metric_classification_dir'], exist_ok=True)
     epochs = metrics_history['epoch']
-    
     # 创建图表
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
@@ -153,7 +152,7 @@ def plot_training_curves(metrics_history, metric_dir):
     plt.tight_layout()
     
     # 保存图表
-    plot_path = os.path.join(metric_dir, 'training_curves.png')
+    plot_path = params['curves_path']
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -230,6 +229,7 @@ def train(params):
     print(f"\n模型参数量: {num_params:,}")
     
     os.makedirs(params['checkpoint_dir'], exist_ok=True)
+    os.makedirs(params['checkpoint_classification_dir'], exist_ok=True)
     # 初始化指标记录 
 
     metrics_history = {
@@ -240,8 +240,11 @@ def train(params):
         'val_accuracy': []
     }
     best_accuracy = 0.0
+    patience = 10
+    no_improve_count = 0
     
     print("开始训练")
+    print(f"早停设置: 验证准确率连续{patience}次无提升将停止训练")
     for epoch in range(1, params['num_epochs'] + 1):
         print(f"\n{'='*80}")
         print(f"Epoch {epoch}/{params['num_epochs']}")
@@ -268,7 +271,8 @@ def train(params):
         metrics_history['val_accuracy'].append(float(val_acc))
         if val_acc > best_accuracy:
             best_accuracy = val_acc
-            checkpoint_path = os.path.join(params['checkpoint_dir'], 'best_model_vit_classification.pth')
+            no_improve_count = 0
+            checkpoint_path = params['checkpoint_path']
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -278,9 +282,17 @@ def train(params):
                 'params': params,
             }, checkpoint_path)
             print(f"\n 保存最佳模型 (Accuracy: {val_acc:.4f}) -> {checkpoint_path}")
+        else:
+            no_improve_count += 1
+            print(f"\n 验证准确率未提升，当前无改善次数: {no_improve_count}/{patience}")
+            
+            if no_improve_count >= patience:
+                print(f"\n早停触发: 验证准确率连续{patience}次未提升，停止训练")
+                break
         
     print("训练结束")
     print(f"最佳验证准确率: {best_accuracy:.4f}")
-    save_training_metrics(metrics_history, params['metric_dir'])
-    plot_training_curves(metrics_history, params['metric_dir'])
+    print(f"实际训练轮数: {epoch}/{params['num_epochs']}")
+    save_training_metrics(metrics_history, params)
+    plot_training_curves(metrics_history, params)
 
